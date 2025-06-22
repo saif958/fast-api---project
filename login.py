@@ -34,6 +34,43 @@ todo = Table(
     Column("id_todo",Integer,primary_key=True),
     Column("tasks", String(500)),
 )
+roles = Table(
+    "roles",
+    metadata,
+    Column("r_id", Integer, primary_key=True),
+    Column("role_name", String(50), unique=True),
+)
+departments = Table(
+    "departments",
+    metadata,
+    Column("D_id", Integer, primary_key=True),
+    Column("department_name", String(100)),
+)
+projects = Table(
+    "projects",
+    metadata,
+    Column("P_id", Integer, primary_key=True),
+    Column("project_name", String(100)),
+    Column("description", String(255)),
+)
+messages = Table(
+    "messages",
+    metadata,
+    Column("M_id", Integer, primary_key=True),
+    Column("sender_id", Integer),
+    Column("receiver_id", Integer),
+    Column("message", String(500)),
+)
+feedback = Table(
+    "feedback",
+    metadata,
+    Column("F_id", Integer, primary_key=True),
+    Column("user_id", Integer),
+    Column("comment", String(255)),
+    Column("rating", Integer)  # e.g., 1 to 5
+)
+
+
 metadata.create_all(engine)
 ph = PasswordHasher() # hashing lib object
 # Hashing password
@@ -53,7 +90,28 @@ class Settings(BaseModel):
 class UserLogin(BaseModel):
     email: str
     password: str 
+class Role(BaseModel):
+    role_name: str
+    model_config = {"from_attributes": True}
+class Department(BaseModel):
+    department_name: str
+    model_config = {"from_attributes": True}
+class Project(BaseModel):
+    project_name: str
+    description: str
+    model_config = {"from_attributes": True}
+class Message(BaseModel):
+    sender_id: int
+    receiver_id: int
+    message: str
 
+    model_config = {"from_attributes": True}
+
+
+class Feedback(BaseModel):
+    user_id: int
+    comment: str
+    rating: int
 app = FastAPI()
 @app.on_event("startup")
 async def startup():
@@ -296,3 +354,135 @@ async def todo_update(todo: todo,Authorize : AuthJWT = Depends(), db: SessionLoc
                 return ("updated")
     except:
         raise HTTPException (status_code=404, detail= "user not found:")
+    
+    
+#roles crud
+@app.post("/roles/create")
+async def create_role(role: Role, Authorize: AuthJWT = Depends(), db: SessionLocal = Depends(get_db)):
+    Authorize.jwt_required()
+    try:
+        decoded_token = jwt.decode(access_token, 'secret', algorithms=["HS256"])
+        email = decoded_token.get("sub")
+        query1 = (f"Select id from users where email = '{email}'")
+        id = await database.fetch_one(query1)
+        query = text("INSERT INTO roles (r_id,role_name) VALUES ('{id.id}','{role_name}')")
+        db.execute(query, {"role_name": role.role_name})
+        db.commit()
+        return {"detail": "Role created"}
+    except:
+        raise HTTPException(status_code=400, detail="Role creation failed")
+
+@app.get("/roles/read")
+async def get_roles(Authorize: AuthJWT = Depends()):
+    Authorize.jwt_required()
+    try:
+        query = "SELECT * FROM roles"
+        roles = await database.fetch_all(query)
+        return roles
+    except:
+        raise HTTPException(status_code=400, detail="Failed to fetch roles")
+
+#Departments Crud 
+@app.post("/departments/create")
+async def create_department(dept: Department, Authorize: AuthJWT = Depends(), db: SessionLocal = Depends(get_db)):
+    Authorize.jwt_required()
+    try:
+        query = text("INSERT INTO departments (department_name) VALUES (:name)")
+        db.execute(query, {"name": dept.department_name})
+        db.commit()
+        return {"detail": "Department created"}
+    except:
+        raise HTTPException(status_code=400, detail="Department creation failed")
+
+@app.get("/departments/read")
+async def get_departments(Authorize: AuthJWT = Depends()):
+    Authorize.jwt_required()
+    try:
+        query = "SELECT * FROM departments"
+        result = await database.fetch_all(query)
+        return result
+    except:
+        raise HTTPException(status_code=400, detail="Failed to fetch departments")
+
+#Projects
+@app.post("/projects/create")
+async def create_project(project: Project, Authorize: AuthJWT = Depends(), db: SessionLocal = Depends(get_db)):
+    Authorize.jwt_required()
+    try:
+        query = text("INSERT INTO projects (project_name, description) VALUES (:name, :desc)")
+        db.execute(query, {"name": project.project_name, "desc": project.description})
+        db.commit()
+        return {"detail": "Project created"}
+    except:
+        raise HTTPException(status_code=400, detail="Project creation failed")
+
+@app.get("/projects/read")
+async def get_projects(Authorize: AuthJWT = Depends()):
+    Authorize.jwt_required()
+    try:
+        query = "SELECT * FROM projects"
+        return await database.fetch_all(query)
+    except:
+        raise HTTPException(status_code=400, detail="Failed to fetch projects")
+
+
+#messages crud
+@app.post("/messages/send")
+async def send_message(msg: Message, Authorize: AuthJWT = Depends(), db: SessionLocal = Depends(get_db)):
+    Authorize.jwt_required()
+    try:
+        decoded_token = jwt.decode(access_token, 'secret', algorithms=["HS256"])
+        email = decoded_token.get("sub")
+        user_id = await database.fetch_one(f"SELECT id FROM users WHERE email='{email}'")
+        if user_id:
+            query = text("INSERT INTO messages (sender_id, receiver_id, message) VALUES (:sid, :rid, :msg)")
+            db.execute(query, {"sid": user_id.id, "rid": msg.receiver_id, "msg": msg.message})
+            db.commit()
+            return {"detail": "Message sent"}
+        else:
+            raise HTTPException(status_code=404, detail="Sender not found")
+    except:
+        raise HTTPException(status_code=400, detail="Failed to send message")
+
+@app.get("/messages/inbox")
+async def get_inbox(Authorize: AuthJWT = Depends()):
+    Authorize.jwt_required()
+    try:
+        decoded_token = jwt.decode(access_token, 'secret', algorithms=["HS256"])
+        email = decoded_token.get("sub")
+        user_id = await database.fetch_one(f"SELECT id FROM users WHERE email='{email}'")
+        if user_id:
+            query = f"SELECT * FROM messages WHERE receiver_id = '{user_id.id}'"
+            return await database.fetch_all(query)
+        else:
+            raise HTTPException(status_code=404, detail="User not found")
+    except:
+        raise HTTPException(status_code=400, detail="Failed to fetch inbox")
+
+
+#feedback crud
+@app.post("/feedback/submit")
+async def submit_feedback(feedback: Feedback, Authorize: AuthJWT = Depends(), db: SessionLocal = Depends(get_db)):
+    Authorize.jwt_required()
+    try:
+        decoded_token = jwt.decode(access_token, 'secret', algorithms=["HS256"])
+        email = decoded_token.get("sub")
+        user_id = await database.fetch_one(f"SELECT id FROM users WHERE email='{email}'")
+        if user_id:
+            query = text("INSERT INTO feedback (user_id, comment, rating) VALUES (:uid, :comment, :rating)")
+            db.execute(query, {"uid": user_id.id, "comment": feedback.comment, "rating": feedback.rating})
+            db.commit()
+            return {"detail": "Feedback submitted"}
+        else:
+            raise HTTPException(status_code=404, detail="User not found")
+    except:
+        raise HTTPException(status_code=400, detail="Feedback submission failed")
+
+@app.get("/feedback/view")
+async def view_feedback(Authorize: AuthJWT = Depends()):
+    Authorize.jwt_required()
+    try:
+        query = "SELECT * FROM feedback"
+        return await database.fetch_all(query)
+    except:
+        raise HTTPException(status_code=400, detail="Failed to fetch feedback")
